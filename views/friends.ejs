@@ -1,0 +1,591 @@
+<%- contentFor('body') %>
+
+<div class="friends-container">
+    <div class="friends-header">
+        <h1>Friends & Community</h1>
+    </div>
+    
+    <div class="friends-content">
+        <div class="friends-list-container">
+            <div class="friends-list-header">
+                <h2>Gym Buddies</h2>
+            </div>
+            
+            <div id="friends-list" class="friends-list">
+                <div class="loading-indicator">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span>Loading users...</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chat-container">
+            <div class="chat-header">
+                <h2>Group Chat</h2>
+            </div>
+            
+            <div id="chat-messages" class="chat-messages">
+                <div class="loading-indicator">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span>Loading messages...</span>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <textarea id="chat-input" placeholder="Type a message..."></textarea>
+                <button id="send-message" class="btn btn-primary">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- User Profile Modal -->
+    <div id="user-profile-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="profile-username">User Profile</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="profile-info">
+                    <div class="profile-avatar">
+                        <span id="profile-initial">A</span>
+                    </div>
+                    
+                    <div class="profile-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Name:</span>
+                            <span id="profile-name" class="detail-value">-</span>
+                        </div>
+                        
+                        <div class="detail-item">
+                            <span class="detail-label">Current Weight:</span>
+                            <span id="profile-weight" class="detail-value">-</span>
+                        </div>
+                        
+                        <div class="detail-item">
+                            <span class="detail-label">Target Weight:</span>
+                            <span id="profile-target" class="detail-value">-</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="profile-tabs">
+                    <button class="profile-tab active" data-tab="workouts">Workouts</button>
+                    <button class="profile-tab" data-tab="weight">Weight Progress</button>
+                </div>
+                
+                <div class="tab-content">
+                    <div id="workouts-tab" class="tab-pane active">
+                        <div class="workout-calendar" id="profile-calendar"></div>
+                    </div>
+                    
+                    <div id="weight-tab" class="tab-pane">
+                        <div class="weight-chart-container">
+                            <canvas id="profile-weight-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let users = [];
+    let messages = [];
+    let currentProfileUser = null;
+    let userProfileChart = null;
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        // Load initial data
+        loadUsers();
+        loadMessages();
+        
+        // Set up event listeners
+        document.getElementById('send-message').addEventListener('click', sendMessage);
+        
+        document.getElementById('chat-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        
+        // Modal close button
+        document.querySelector('.modal-close').addEventListener('click', function() {
+            document.getElementById('user-profile-modal').style.display = 'none';
+            
+            // Destroy chart to prevent memory leaks
+            if (userProfileChart) {
+                userProfileChart.destroy();
+                userProfileChart = null;
+            }
+        });
+        
+        // Tab switching
+        document.querySelectorAll('.profile-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                // Remove active class from all tabs
+                document.querySelectorAll('.profile-tab').forEach(t => {
+                    t.classList.remove('active');
+                });
+                
+                // Add active class to clicked tab
+                this.classList.add('active');
+                
+                // Hide all tab panes
+                document.querySelectorAll('.tab-pane').forEach(pane => {
+                    pane.classList.remove('active');
+                });
+                
+                // Show the selected tab pane
+                const tabId = this.dataset.tab;
+                document.getElementById(`${tabId}-tab`).classList.add('active');
+                
+                // If weight tab is selected, initialize chart
+                if (tabId === 'weight' && currentProfileUser) {
+                    initWeightChart(currentProfileUser.weights);
+                }
+            });
+        });
+        
+        // Set up auto-refresh for messages every 10 seconds
+        setInterval(loadMessages, 10000);
+    });
+    
+    async function loadUsers() {
+        try {
+            const response = await fetch('/friends/users');
+            const data = await response.json();
+            
+            if (!data.users) {
+                throw new Error('No users found');
+            }
+            
+            users = data.users;
+            renderUsers(users);
+        } catch (error) {
+            console.error('Error loading users:', error);
+            document.getElementById('friends-list').innerHTML = `
+                <div class="error-message">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span>Error loading users</span>
+                </div>
+            `;
+        }
+    }
+    
+    function renderUsers(userList) {
+        const friendsList = document.getElementById('friends-list');
+        
+        if (!userList.length) {
+            friendsList.innerHTML = `
+                <div class="empty-message">
+                    <i class="fas fa-users"></i>
+                    <span>No other users found</span>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = '';
+        
+        userList.forEach(user => {
+            const name = user.first_name && user.last_name ? 
+                `${user.first_name} ${user.last_name}` : 
+                user.username;
+                
+            const initial = user.first_name ? 
+                user.first_name.charAt(0).toUpperCase() : 
+                user.username.charAt(0).toUpperCase();
+            
+            html += `
+                <div class="friend-card" data-user-id="${user.id}">
+                    <div class="friend-avatar">
+                        <span>${initial}</span>
+                    </div>
+                    <div class="friend-info">
+                        <div class="friend-name">${name}</div>
+                        <div class="friend-details">
+                            ${user.current_weight ? `<span>${user.current_weight} lbs</span>` : ''}
+                        </div>
+                    </div>
+                    <button class="btn-icon view-profile">
+                        <i class="fas fa-user"></i>
+                    </button>
+                </div>
+            `;
+        });
+        
+        friendsList.innerHTML = html;
+        
+        // Add event listeners to profile buttons
+        document.querySelectorAll('.view-profile').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const userId = parseInt(this.closest('.friend-card').dataset.userId);
+                const user = users.find(u => u.id === userId);
+                
+                if (user) {
+                    openUserProfile(user);
+                }
+            });
+        });
+    }
+    
+    async function loadMessages() {
+        try {
+            const response = await fetch('/friends/messages');
+            const data = await response.json();
+            
+            if (!data.messages) {
+                throw new Error('No messages found');
+            }
+            
+            // Check if messages are different from what we already have
+            if (JSON.stringify(messages) !== JSON.stringify(data.messages)) {
+                messages = data.messages;
+                renderMessages(messages);
+                
+                // Scroll to bottom of chat
+                const chatContainer = document.getElementById('chat-messages');
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        } catch (error) {
+            console.error('Error loading messages:', error);
+            document.getElementById('chat-messages').innerHTML = `
+                <div class="error-message">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span>Error loading messages</span>
+                </div>
+            `;
+        }
+    }
+    
+    function renderMessages(messageList) {
+        const chatMessages = document.getElementById('chat-messages');
+        
+        if (!messageList.length) {
+            chatMessages.innerHTML = `
+                <div class="empty-message">
+                    <i class="fas fa-comments"></i>
+                    <span>No messages yet. Start the conversation!</span>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = '';
+        let currentDate = null;
+        
+        messageList.forEach(message => {
+            // Check if we need to add a date separator
+            const messageDate = new Date(message.created_at).toLocaleDateString();
+            if (messageDate !== currentDate) {
+                html += `<div class="date-separator">${messageDate}</div>`;
+                currentDate = messageDate;
+            }
+            
+            // Format time
+            const time = new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            // Check if message is from current user
+            const isCurrentUser = message.user_id === <%= user.id %>;
+            const className = isCurrentUser ? 'message-self' : 'message-other';
+            
+            html += `
+                <div class="message ${className}" data-message-id="${message.id}">
+                    ${!isCurrentUser ? `
+                        <div class="message-avatar">
+                            <span>${message.first_name ? message.first_name.charAt(0) : message.username.charAt(0)}</span>
+                        </div>
+                    ` : ''}
+                    
+                    <div class="message-content">
+                        ${!isCurrentUser ? `
+                            <div class="message-sender">${message.first_name || message.username}</div>
+                        ` : ''}
+                        <div class="message-text">${message.message}</div>
+                        <div class="message-time">${time}</div>
+                    </div>
+                    
+                    ${isCurrentUser ? `
+                        <button class="delete-message" title="Delete Message">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+        });
+        
+        chatMessages.innerHTML = html;
+        
+        // Add event listeners to delete buttons
+        document.querySelectorAll('.delete-message').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const messageId = parseInt(this.closest('.message').dataset.messageId);
+                if (confirm('Delete this message?')) {
+                    deleteMessage(messageId);
+                }
+            });
+        });
+    }
+    
+    async function sendMessage() {
+        const input = document.getElementById('chat-input');
+        const message = input.value.trim();
+        
+        if (!message) return;
+        
+        try {
+            const response = await fetch('/friends/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to send message');
+            }
+            
+            // Clear input
+            input.value = '';
+            
+            // Reload messages
+            loadMessages();
+        } catch (error) {
+            console.error('Error sending message:', error);
+            alert('Error sending message');
+        }
+    }
+    
+    async function deleteMessage(messageId) {
+        try {
+            const response = await fetch(`/friends/messages/${messageId}`, {
+                method: 'DELETE'
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to delete message');
+            }
+            
+            // Reload messages
+            loadMessages();
+        } catch (error) {
+            console.error('Error deleting message:', error);
+            alert('Error deleting message');
+        }
+    }
+    
+    async function openUserProfile(user) {
+        currentProfileUser = null;
+        
+        // Show loading state
+        document.getElementById('profile-username').textContent = user.username;
+        document.getElementById('profile-initial').textContent = 
+            user.first_name ? user.first_name.charAt(0) : user.username.charAt(0);
+        document.getElementById('profile-name').textContent = 'Loading...';
+        document.getElementById('profile-weight').textContent = 'Loading...';
+        document.getElementById('profile-target').textContent = 'Loading...';
+        document.getElementById('profile-calendar').innerHTML = '<div class="loading-indicator"><i class="fas fa-spinner fa-spin"></i></div>';
+        
+        // Show modal
+        document.getElementById('user-profile-modal').style.display = 'flex';
+        
+        // Reset tabs
+        document.querySelectorAll('.profile-tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        document.getElementById('workouts-tab').classList.remove('active');
+        document.getElementById('weight-tab').classList.remove('active');
+        
+        document.querySelector('.profile-tab[data-tab="workouts"]').classList.add('active');
+        document.getElementById('workouts-tab').classList.add('active');
+        
+        // Load user profile data
+        try {
+            const response = await fetch(`/friends/users/${user.id}`);
+            const data = await response.json();
+            
+            if (!data.user) {
+                throw new Error('User not found');
+            }
+            
+            currentProfileUser = data;
+            
+            // Update profile info
+            document.getElementById('profile-username').textContent = data.user.username;
+            
+            const name = data.user.first_name && data.user.last_name ? 
+                `${data.user.first_name} ${data.user.last_name}` : 
+                'Not set';
+            
+            document.getElementById('profile-name').textContent = name;
+            document.getElementById('profile-weight').textContent = 
+                data.user.current_weight ? `${data.user.current_weight} lbs` : 'Not set';
+            document.getElementById('profile-target').textContent = 
+                data.user.target_weight ? `${data.user.target_weight} lbs` : 'Not set';
+            
+            // Render workout calendar
+            renderWorkoutCalendar(data.workouts);
+        } catch (error) {
+            console.error('Error loading user profile:', error);
+            document.getElementById('profile-name').textContent = 'Error loading profile';
+            document.getElementById('profile-calendar').innerHTML = '<div class="error-message"><i class="fas fa-exclamation-circle"></i> Error loading data</div>';
+        }
+    }
+    
+    function renderWorkoutCalendar(workouts) {
+        if (!workouts || workouts.length === 0) {
+            document.getElementById('profile-calendar').innerHTML = `
+                <div class="empty-message">
+                    <i class="fas fa-calendar-times"></i>
+                    <span>No workout data available</span>
+                </div>
+            `;
+            return;
+        }
+        
+        // Create workout status map
+        const workoutMap = {};
+        workouts.forEach(workout => {
+            workoutMap[workout.date] = workout.status;
+        });
+        
+        // Generate calendar HTML
+        const today = new Date();
+        const calendarHtml = generateCalendarHtml(today, workoutMap);
+        
+        document.getElementById('profile-calendar').innerHTML = calendarHtml;
+    }
+    
+    function generateCalendarHtml(date, workoutMap) {
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        
+        // Get first day of month and number of days
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+                           
+        let html = `
+            <div class="calendar-header">
+                <span>${monthNames[month]} ${year}</span>
+            </div>
+            <div class="calendar-body">
+                <div class="calendar-row days">
+                    <div class="calendar-day-head">Sun</div>
+                    <div class="calendar-day-head">Mon</div>
+                    <div class="calendar-day-head">Tue</div>
+                    <div class="calendar-day-head">Wed</div>
+                    <div class="calendar-day-head">Thu</div>
+                    <div class="calendar-day-head">Fri</div>
+                    <div class="calendar-day-head">Sat</div>
+                </div>
+                <div class="calendar-row">
+        `;
+        
+        // Fill in blanks for days before first of month
+        for (let i = 0; i < firstDay; i++) {
+            html += '<div class="calendar-day empty"></div>';
+        }
+        
+        // Fill in days of month
+        for (let day = 1; day <= daysInMonth; day++) {
+            if ((day + firstDay - 1) % 7 === 0 && day !== 1) {
+                html += '</div><div class="calendar-row">';
+            }
+            
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const workoutStatus = workoutMap[dateStr];
+            
+            let statusClass = '';
+            if (workoutStatus === 'complete') {
+                statusClass = 'workout-complete';
+            } else if (workoutStatus === 'incomplete') {
+                statusClass = 'workout-incomplete';
+            } else if (workoutStatus === 'skipped') {
+                statusClass = 'workout-skipped';
+            }
+            
+            // Highlight today
+            const isToday = day === new Date().getDate() && 
+                            month === new Date().getMonth() && 
+                            year === new Date().getFullYear();
+            
+            html += `
+                <div class="calendar-day ${isToday ? 'today' : ''} ${statusClass}">
+                    <div class="day-number">${day}</div>
+                </div>
+            `;
+        }
+        
+        // Fill in blanks after last day
+        const lastDayIndex = (firstDay + daysInMonth - 1) % 7;
+        for (let i = lastDayIndex; i < 6; i++) {
+            html += '<div class="calendar-day empty"></div>';
+        }
+        
+        html += '</div></div>';
+        
+        return html;
+    }
+    
+    function initWeightChart(weights) {
+        if (!weights || weights.length === 0) {
+            document.getElementById('profile-weight-chart').innerHTML = `
+                <div class="empty-message">
+                    <i class="fas fa-weight"></i>
+                    <span>No weight data available</span>
+                </div>
+            `;
+            return;
+        }
+        
+        // Destroy previous chart if exists
+        if (userProfileChart) {
+            userProfileChart.destroy();
+        }
+        
+        // Format data for chart
+        const dates = weights.map(entry => new Date(entry.date).toLocaleDateString());
+        const weightValues = weights.map(entry => entry.weight);
+        
+        // Create chart
+        const ctx = document.getElementById('profile-weight-chart').getContext('2d');
+        userProfileChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: dates.reverse(), // Show oldest to newest
+                datasets: [{
+                    label: 'Weight (lbs)',
+                    data: weightValues.reverse(),
+                    backgroundColor: 'rgba(74, 108, 247, 0.2)',
+                    borderColor: 'rgba(74, 108, 247, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    pointBackgroundColor: 'rgba(74, 108, 247, 1)'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+</script>

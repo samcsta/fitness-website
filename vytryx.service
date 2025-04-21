@@ -1,0 +1,23 @@
+[Unit]
+Description=Vytryx Fitness Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/vytryx
+ExecStart=/usr/bin/node app.js
+Restart=always
+# Restart service after 10 seconds if node service crashes
+RestartSec=10
+# Output to syslog
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=vytryx
+Environment=NODE_ENV=production
+# Read environment variables from .env file
+EnvironmentFile=/opt/vytryx/.env
+
+[Install]
+WantedBy=multi-user.target
