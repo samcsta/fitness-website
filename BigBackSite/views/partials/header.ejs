@@ -1,0 +1,20 @@
+<header class="main-header">
+    <div class="header-left">
+        <button id="sidebar-toggle" class="sidebar-toggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <h2 class="page-title"><%= typeof pageTitle !== 'undefined' ? pageTitle : 'Dashboard' %></h2>
+    </div>
+    
+    <div class="header-right">
+        <div class="user-menu">
+            <div class="user-info">
+                <span class="user-name"><%= user.firstName ? user.firstName : user.username %></span>
+                <span class="user-role"><%= user.isAdmin ? 'Admin' : 'Member' %></span>
+            </div>
+            <div class="user-avatar">
+                <span><%= user.firstName ? user.firstName.charAt(0) : user.username.charAt(0) %></span>
+            </div>
+        </div>
+    </div>
+</header>
